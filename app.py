@@ -3,6 +3,7 @@ import glob
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from scipy import stats
 import streamlit as st
 
@@ -78,19 +79,18 @@ use_log_scale = st.sidebar.checkbox(
     help="초변이(Hypermutation) 샘플로 인한 왜곡을 완화하여 저변이 구간의 차이를 확인합니다.",
 )
 
-# [새로 추가] 3-3. 사이드바에 종양 발생 위치 선택(전체, 대장, 직장) UI 추가
+# 3-3. 사이드바에 종양 발생 위치 선택(전체, 대장, 직장)
 selected_site_kr = st.sidebar.selectbox(
     "3. 종양 발생 위치 선택",
     options=["전체", "대장", "직장"],
     help="분석할 종양의 해부학적 발생 부위를 선택합니다.",
 )
 
-# [새로 추가] 선택된 한국어 옵션('대장', '직장')을 원본 데이터의 영문 명칭('Colon', 'Rectum')과 매핑하여 필터링
+# 선택된 옵션을 원본 영문 컬럼값과 매핑하여 필터링
 site_mapping = {"대장": "Colon", "직장": "Rectum"}
 if selected_site_kr in site_mapping:
     filtered_df = df[df["Tumor Disease Anatomic Site"] == site_mapping[selected_site_kr]].copy()
 else:
-    # '전체' 선택 시 결측치를 제외한 전체 데이터 유지
     filtered_df = df.copy()
 
 # 데이터 요약 정보 출력
@@ -102,7 +102,35 @@ st.sidebar.write(f"• 선택 부위({selected_site_kr}) 샘플 수: **{len(filt
 
 # 기본 색상 매핑 및 축 레이블
 color_discrete_map = {"MSS": "#1f77b4", "MSI-H": "#d62728"}
+site_colors = {"Colon": "#2ca02c", "Rectum": "#9467bd"}
 y_label = "Mutation Count (Log10 Scale)" if use_log_scale else "Mutation Count"
+
+
+# [수정] statsmodels 없이 scipy.stats로 안전하게 회귀선 좌표를 계산하는 헬퍼 함수
+def calculate_regression_line(x_vals, y_vals, is_log_scale=False, n_points=100):
+    """결측치를 제외하고 OLS 선형/로그 회귀선을 계산하여 x, y 좌표를 반환"""
+    mask = ~(np.isnan(x_vals) | np.isnan(y_vals))
+    x_clean = np.array(x_vals)[mask]
+    y_clean = np.array(y_vals)[mask]
+
+    if len(x_clean) < 2 or (x_clean.max() == x_clean.min()):
+        return None, None
+
+    x_line = np.linspace(x_clean.min(), x_clean.max(), n_points)
+
+    if is_log_scale:
+        # 로그 스케일일 경우 0 이하 값은 최소 양수값으로 치환 후 log10 공간에서 선형 회귀
+        y_positive = np.where(y_clean > 0, y_clean, 1.0)
+        log_y = np.log10(y_positive)
+        slope, intercept, _, _, _ = stats.linregress(x_clean, log_y)
+        y_line = 10 ** (slope * x_line + intercept)
+    else:
+        # 일반 스케일일 경우 일반 선형 회귀
+        slope, intercept, _, _, _ = stats.linregress(x_clean, y_clean)
+        y_line = slope * x_line + intercept
+
+    return x_line, y_line
+
 
 # ----------------- 4. 분석 결과 탭 구성 -----------------
 tab1, tab2, tab3, tab4 = st.tabs(
@@ -124,7 +152,7 @@ with tab1:
     if plot1_df.empty:
         st.warning("선택된 조건에 해당하는 유효 데이터가 없습니다.")
     else:
-        # [새로 추가] 산점도에 전체 데이터 경향성을 나타내는 OLS 선형 회귀선(trendline) 추가
+        # 기본 산점도 생성 (trendline="ols" 옵션을 제거하여 statsmodels 미설치 오류 방지)
         fig1 = px.scatter(
             plot1_df,
             x=msi_metric,
@@ -133,9 +161,6 @@ with tab1:
             color_discrete_map=color_discrete_map,
             hover_data=["Tumor Disease Anatomic Site"],
             log_y=use_log_scale,
-            trendline="ols",  # [새로 추가] 최소자승법(OLS) 기반 회귀선 생성
-            trendline_scope="overall",  # [새로 추가] 집단별로 나뉘지 않고 전체 데이터를 포괄하는 단일 회귀선 설정
-            trendline_color_override="#2ca02c",  # [새로 추가] 회귀선 색상을 녹색으로 지정하여 가시성 확보
             labels={
                 msi_metric: f"{msi_metric}",
                 "Mutation Count": y_label,
@@ -145,6 +170,22 @@ with tab1:
             template="plotly_white",
             height=550,
         )
+
+        # [수정] 전체 데이터를 포괄하는 선형 회귀선을 독립적으로 계산하여 추가
+        x_line, y_line = calculate_regression_line(
+            plot1_df[msi_metric], plot1_df["Mutation Count"], is_log_scale=use_log_scale
+        )
+        if x_line is not None:
+            fig1.add_trace(
+                go.Scatter(
+                    x=x_line,
+                    y=y_line,
+                    mode="lines",
+                    name="전체 회귀선",
+                    line=dict(color="#2ca02c", width=2.5),
+                    hoverinfo="skip",
+                )
+            )
 
         # 임계 기준선 추가
         fig1.add_vline(
@@ -161,7 +202,6 @@ with tab1:
         )
         st.plotly_chart(fig1, use_container_width=True)
 
-        # 상관계수 계산
         corr, pval = stats.spearmanr(plot1_df[msi_metric], plot1_df["Mutation Count"])
         st.info(
             f"📌 **Spearman 상관계수**: `{corr:.3f}` (p-value: `{pval:.2e}`) | "
@@ -199,7 +239,6 @@ with tab2:
         fig2.update_layout(autosize=True, showlegend=False)
         st.plotly_chart(fig2, use_container_width=True)
 
-        # 비모수 검정 (Mann-Whitney U Test)
         mss_mut = plot2_df[plot2_df[status_col] == "MSS"]["Mutation Count"]
         msih_mut = plot2_df[plot2_df[status_col] == "MSI-H"]["Mutation Count"]
 
@@ -220,61 +259,9 @@ with tab3:
     if plot3_df.empty:
         st.warning("선택된 조건에 해당하는 유효 데이터가 없습니다.")
     else:
-        # [새로 추가] 종양 발생 위치(Colon, Rectum) 그룹별 각각의 OLS 회귀선(trendline) 추가
         fig3 = px.scatter(
             plot3_df,
             x=msi_metric,
             y="Mutation Count",
             color="Tumor Disease Anatomic Site",
             symbol=status_col,
-            hover_data=[status_col],
-            log_y=use_log_scale,
-            trendline="ols",  # [새로 추가] 각 위치 그룹별 회귀선 자동 계산 및 표시
-            labels={
-                msi_metric: f"{msi_metric}",
-                "Mutation Count": y_label,
-                "Tumor Disease Anatomic Site": "종양 발생 부위",
-                status_col: "MSI 판정",
-            },
-            template="plotly_white",
-            height=550,
-        )
-        fig3.add_vline(
-            x=threshold,
-            line_width=1.5,
-            line_dash="dot",
-            line_color="gray",
-            annotation_text=threshold_label,
-        )
-        fig3.update_layout(autosize=True)
-        st.plotly_chart(fig3, use_container_width=True)
-
-        if selected_site_kr != "전체":
-            st.caption(f"💡 현재 사이드바에서 **'{selected_site_kr}'** 부위만 선택되어 단일 그룹 회귀선이 표시됩니다.")
-
-        # 부위별 상태 분포 요약표
-        st.markdown("##### 📍 발생 부위별 MSI 분류 현황")
-        site_summary = (
-            plot3_df.groupby(["Tumor Disease Anatomic Site", status_col])
-            .size()
-            .unstack(fill_value=0)
-        )
-        if "MSI-H" in site_summary.columns and "MSS" in site_summary.columns:
-            site_summary["합계"] = site_summary["MSS"] + site_summary["MSI-H"]
-            site_summary["MSI-H 비율(%)"] = (
-                (site_summary["MSI-H"] / site_summary["합계"]) * 100
-            ).round(1)
-        st.dataframe(site_summary, use_container_width=True)
-
-# --- 탭 4: 원본 데이터 테이블 ---
-with tab4:
-    st.subheader("4. 정제 데이터셋 테이블")
-    st.dataframe(filtered_df, use_container_width=True)
-
-    csv_data = filtered_df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        label="📥 필터링된 데이터 CSV 다운로드",
-        data=csv_data,
-        file_name="processed_colorectal_msi_filtered.csv",
-        mime="text/csv",
-    )
