@@ -47,7 +47,6 @@ def load_data():
                     "MSI MANTIS Score",
                 ]
                 if all(col in df.columns for col in required_cols):
-                    # [수정/추가] 데이터 문자열의 앞뒤 공백을 제거하여 필터링 조건 매칭 오류 방지
                     if "Tumor Disease Anatomic Site" in df.columns:
                         df["Tumor Disease Anatomic Site"] = df[
                             "Tumor Disease Anatomic Site"
@@ -91,22 +90,20 @@ use_log_scale = st.sidebar.checkbox(
     help="초변이(Hypermutation) 샘플로 인한 극단적 왜곡을 완화하여 저변이 구간의 차이를 명확히 확인합니다.",
 )
 
-# [수정/추가] 3-3. 사이드바 종양 발생 위치 선택 라디오/셀렉트박스
+# 3-3. 사이드바 종양 발생 위치 선택
 site_selection = st.sidebar.selectbox(
     "3. 종양 발생 위치 선택",
     options=["전체", "대장", "직장"],
     help="특정 발생 부위(전체 / 대장 / 직장)를 선택하여 모든 산점도 및 분석 결과를 동적으로 필터링합니다.",
 )
 
-# [수정/추가] 한글 선택지('대장', '직장')를 원본 영문 표기('Colon', 'Rectum')에 정확히 매핑
 site_mapping = {"대장": "Colon", "직장": "Rectum"}
 
-# [수정/추가] 선택된 부위에 따라 앱 전체가 공유할 filtered_df 동적 생성
 if site_selection == "전체":
-    filtered_df = df.copy()  # '전체' 선택 시 모든 부위 데이터 유지
+    filtered_df = df.copy()
 else:
     target_site = site_mapping[site_selection]
-    filtered_df = df[df["Tumor Disease Anatomic Site"] == target_site].copy()  # 대장 또는 직장만 필터링
+    filtered_df = df[df["Tumor Disease Anatomic Site"] == target_site].copy()
 
 # 사이드바 데이터 요약 현황
 st.sidebar.markdown("---")
@@ -133,7 +130,6 @@ tab1, tab2, tab3, tab4 = st.tabs(
 
 # --- 탭 1: MSI 점수와 돌연변이 수 산점도 ---
 with tab1:
-    # [수정/추가] 현재 필터링된 부위 명칭을 탭 제목에 실시간 표기
     st.subheader(
         f"1. {msi_metric}와 돌연변이 수(Mutation Count) 산점도 [선택 부위: {site_selection}]"
     )
@@ -159,9 +155,9 @@ with tab1:
             color_discrete_map=color_discrete_map,
             hover_data=["Tumor Disease Anatomic Site"],
             log_y=use_log_scale,
-            trendline="ols",  # 최소자승법(OLS) 선형 회귀선 추가
-            trendline_scope="overall",  # 선택된 데이터 전체에 대한 단일 회귀선
-            trendline_color_override="#2b2b2b",  # 회귀선 색상 지정
+            trendline="ols",
+            trendline_scope="overall",
+            trendline_color_override="#2b2b2b",
             labels={
                 msi_metric: f"{msi_metric}",
                 "Mutation Count": y_label,
@@ -233,4 +229,91 @@ with tab2:
         mss_mut = plot2_df[plot2_df[status_col] == "MSS"]["Mutation Count"]
         msih_mut = plot2_df[plot2_df[status_col] == "MSI-H"]["Mutation Count"]
 
-        if len(mss_mut) > 0 and len(msih
+        # 오류가 발생했던 라인 복원 (괄호 및 변수명 완전 종결)
+        if len(mss_mut) > 0 and len(msih_mut) > 0:
+            stat, p_val = stats.mannwhitneyu(
+                msih_mut, mss_mut, alternative="greater"
+            )
+            col_s1, col_s2, col_s3 = st.columns(3)
+            col_s1.metric(
+                "MSS 중앙값 (평균)",
+                f"{mss_mut.median():.0f} ({mss_mut.mean():.1f})",
+            )
+            col_s2.metric(
+                "MSI-H 중앙값 (평균)",
+                f"{msih_mut.median():.0f} ({msih_mut.mean():.1f})",
+            )
+            col_s3.metric("Mann-Whitney U p-value", f"{p_val:.2e}")
+
+# --- 탭 3: 종양 발생 위치별 그룹 산점도 ---
+with tab3:
+    st.subheader(
+        f"3. 종양 발생 위치에 따른 {msi_metric}와 돌연변이 수 산점도 [선택 부위: {site_selection}]"
+    )
+
+    cols3 = [
+        msi_metric,
+        "Mutation Count",
+        status_col,
+        "Tumor Disease Anatomic Site",
+    ]
+    plot3_df = filtered_df[cols3].dropna()
+
+    if plot3_df.empty:
+        st.warning(
+            f"'{site_selection}' 부위에 해당하는 유효 데이터가 없습니다."
+        )
+    else:
+        fig3 = px.scatter(
+            plot3_df,
+            x=msi_metric,
+            y="Mutation Count",
+            color="Tumor Disease Anatomic Site",
+            symbol=status_col,
+            hover_data=[status_col],
+            log_y=use_log_scale,
+            trendline="ols",
+            labels={
+                msi_metric: f"{msi_metric}",
+                "Mutation Count": y_label,
+                "Tumor Disease Anatomic Site": "종양 발생 부위",
+                status_col: "MSI 판정",
+            },
+            template="plotly_white",
+            height=550,
+        )
+        fig3.add_vline(
+            x=threshold,
+            line_width=1.5,
+            line_dash="dot",
+            line_color="gray",
+            annotation_text=threshold_label,
+        )
+        fig3.update_layout(autosize=True)
+        st.plotly_chart(fig3, use_container_width=True)
+
+        st.markdown(f"##### 📍 발생 부위별 MSI 분류 현황 ({site_selection} 기준)")
+        site_summary = (
+            plot3_df.groupby(["Tumor Disease Anatomic Site", status_col])
+            .size()
+            .unstack(fill_value=0)
+        )
+        if "MSI-H" in site_summary.columns and "MSS" in site_summary.columns:
+            site_summary["합계"] = site_summary["MSS"] + site_summary["MSI-H"]
+            site_summary["MSI-H 비율(%)"] = (
+                (site_summary["MSI-H"] / site_summary["합계"]) * 100
+            ).round(1)
+        st.dataframe(site_summary, use_container_width=True)
+
+# --- 탭 4: 원본 데이터 테이블 ---
+with tab4:
+    st.subheader(f"4. 데이터셋 테이블 ({site_selection} 기준)")
+    st.dataframe(filtered_df, use_container_width=True)
+
+    csv_data = filtered_df.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        label=f"📥 {site_selection} 데이터 CSV 다운로드",
+        data=csv_data,
+        file_name=f"colorectal_msi_{site_selection}.csv",
+        mime="text/csv",
+    )
