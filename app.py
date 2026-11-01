@@ -15,7 +15,7 @@ st.set_page_config(
 
 st.title("🧬 대장암 미세부수체 불안정성(MSI) 및 돌연변이 축적 분석")
 
-# [신규 추가] 원자료 출처, cBioPortal 플랫폼 정보 및 GitHub README 권장 안내 텍스트 추가
+# 원자료 출처, cBioPortal 플랫폼 정보 및 GitHub README 권장 안내 텍스트
 st.markdown(
     """
 TCGA 대장선암 데이터를 기반으로 **미세부수체 불안정성(MSI) 지표**와 
@@ -310,6 +310,29 @@ with tab3:
         )
         fig3.update_layout(autosize=True)
         st.plotly_chart(fig3, use_container_width=True)
+
+        # [신규 추가] 종양 발생 부위별 Spearman & Pearson 상관계수 및 유의확률 계산
+        corr_records = []
+        for site, group in plot3_df.groupby("Tumor Disease Anatomic Site"):
+            # 상관계수 계산을 위해 최소 3개 이상의 표본이 있는 경우 실행
+            if len(group) >= 3:
+                sp_r, sp_p = stats.spearmanr(group[msi_metric], group["Mutation Count"])
+                pe_r, pe_p = stats.pearsonr(group[msi_metric], group["Mutation Count"])
+                corr_records.append({
+                    "종양 발생 부위": site,
+                    "유효 표본 수 (N)": len(group),
+                    "Spearman 상관계수 (r)": round(sp_r, 3),
+                    "Spearman p-value": f"{sp_p:.2e}",
+                    "Pearson 상관계수 (r)": round(pe_r, 3),
+                    "Pearson p-value": f"{pe_p:.2e}",
+                    "통계적 유의성": "유의함 (p < 0.05)" if sp_p < 0.05 else "유의하지 않음 (p ≥ 0.05)",
+                })
+
+        # [신규 추가] 계산된 상관계수 결과를 데이터프레임으로 변환하여 표 형태로 화면에 출력
+        if corr_records:
+            st.markdown(f"##### 📊 종양 발생 부위별 {msi_metric} & Mutation Count 상관계수 요약표")
+            corr_df = pd.DataFrame(corr_records)
+            st.dataframe(corr_df, use_container_width=True)
 
         st.markdown(f"##### 📍 발생 부위별 MSI 분류 현황 ({site_selection} 기준)")
         site_summary = (
