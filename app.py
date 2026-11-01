@@ -1,154 +1,110 @@
+import os
+import glob
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from scipy import stats
 import streamlit as st
 
-# 페이지 환경 설정
+# 1. 페이지 설정
 st.set_page_config(
     page_title="대장암 MSI 및 돌연변이 축적 분석",
     page_icon="🧬",
     layout="wide",
 )
 
-st.title("🧬 대장암 MSI 지표 및 돌연변이 축적 분석 대시보드")
+st.title("🧬 대장암 미세부수체 불안정성(MSI) 및 돌연변이 축적 분석")
 st.markdown(
     """
-TCGA PanCancer Atlas 대장암(COAD/READ) 데이터를 기반으로 
-**미세부수체 불안정성(Microsatellite Instability, MSI)** 상태와 
-**체세포 돌연변이 수(Mutation Count)** 간의 상호작용 및 종양 해부학적 발생 위치별 차이를 탐색합니다.
+TCGA 대장선암 데이터를 기반으로 **미세부수체 불안정성(MSI) 지표**와 
+**체세포 돌연변이 수(Mutation Count)**의 상관관계 및 종양 발생 부위별 분포를 분석합니다.
 """
 )
 
 
-# 데이터 로드 캐싱
+# 2. 데이터 로드 함수
 @st.cache_data
 def load_data():
-    file_path = "processed_colorectal_msi.csv"
-    try:
-        df = pd.read_csv(file_path)
-    except FileNotFoundError:
-        # 파일이 없을 경우 원본 파일에서 온더플라이 전처리
-        raw_df = pd.read_csv(
-            "Colorectal Adenocarcinoma (TCGA, PanCancer Atlas).csv"
-        )
-        selected_cols = [
-            "MSIsensor Score",
-            "Mutation Count",
-            "MSI MANTIS Score",
-            "Tumor Disease Anatomic Site",
-        ]
-        df = raw_df[selected_cols].copy()
-        df["MSIsensor 기반 MSI 상태"] = df["MSIsensor Score"].apply(
-            lambda x: (
-                "MSI-H" if x >= 3.5 else ("MSS" if pd.notna(x) else np.nan)
-            )
-        )
-        df["MANTIS 기반 MSI 상태"] = df["MSI MANTIS Score"].apply(
-            lambda x: (
-                "MSI-H" if x >= 0.4 else ("MSS" if pd.notna(x) else np.nan)
-            )
-        )
-        final_order = [
-            "MSIsensor Score",
-            "Mutation Count",
-            "MSI MANTIS Score",
-            "MSIsensor 기반 MSI 상태",
-            "MANTIS 기반 MSI 상태",
-            "Tumor Disease Anatomic Site",
-        ]
-        df = df[final_order]
-    return df
+    candidate_files = [
+        "processed_colorectal_msi.csv",
+        "processed_colorectal_msi_4.csv",
+        "processed_colorectal_msi_no_sample_id.csv",
+        "processed_colorectal_msi",
+    ]
+
+    # 현재 디렉터리 내 CSV 파일 자동 탐색
+    all_csvs = glob.glob("*.csv")
+    search_order = candidate_files + [f for f in all_csvs if f not in candidate_files]
+
+    for fpath in search_order:
+        if os.path.exists(fpath):
+            try:
+                df = pd.read_csv(fpath)
+                required_cols = ["MSIsensor Score", "Mutation Count", "MSI MANTIS Score"]
+                if all(col in df.columns for col in required_cols):
+                    return df, fpath
+            except Exception:
+                continue
+
+    st.error("분석용 CSV 파일을 찾을 수 없습니다. 프로젝트 폴더에 데이터 파일을 확인해주세요.")
+    st.stop()
 
 
-df = load_data()
+df, loaded_filename = load_data()
 
-# ----------------- 사이드바 설정 -----------------
-st.sidebar.header("🔍 분석 필터 설정")
+# 3. 사이드바 컨트롤러 (필터 조건)
+st.sidebar.header("⚙️ 분석 필터 조건")
 
-# 1. MSI 지표 선택
+# 3-1. MSI 지표 선택
 msi_metric = st.sidebar.selectbox(
-    "MSI 지표 선택",
+    "1. MSI 지표 선택",
     options=["MSIsensor Score", "MSI MANTIS Score"],
-    help="분석에 사용할 미세부수체 불안정성 산출 알고리즘을 선택합니다.",
+    help="분석 기준이 될 미세부수체 불안정성(MSI) 산출 알고리즘을 선택합니다.",
 )
 
-# 선택된 지표에 따른 상태 컬럼 및 임계값 맵핑
+# 선택된 지표에 따른 상태 열 및 임계값 설정
 if msi_metric == "MSIsensor Score":
     status_col = "MSIsensor 기반 MSI 상태"
     threshold = 3.5
-    desc = "임계값: 3.5 (MSS < 3.5 ≤ MSI-H)"
+    threshold_label = "기준선 (3.5)"
 else:
     status_col = "MANTIS 기반 MSI 상태"
     threshold = 0.4
-    desc = "임계값: 0.4 (MSS < 0.4 ≤ MSI-H)"
+    threshold_label = "기준선 (0.4)"
 
-st.sidebar.info(f"**선택된 기준**: {desc}")
-
-# 2. Y축 로그 스케일 적용 여부
+# 3-2. Mutation Count 로그 스케일 여부
 use_log_scale = st.sidebar.checkbox(
-    "Mutation Count 로그 스케일(Log10) 적용",
+    "2. Mutation Count 로그 스케일(Log10) 적용",
     value=False,
-    help="초변이(Hypermutation) 샘플로 인한 왜곡을 완화하여 저변이 구간의 분포를 명확히 관찰합니다.",
+    help="초변이(Hypermutation) 샘플로 인한 극단적 왜곡을 완화하여 저변이 구간의 차이를 명확히 확인합니다.",
 )
 
-# 3. 해부학적 위치 필터 (선택 사항)
-available_sites = df["Tumor Disease Anatomic Site"].dropna().unique().tolist()
-selected_sites = st.sidebar.multiselect(
-    "종양 발생 위치 필터링",
-    options=available_sites,
-    default=available_sites,
-    help="분석에 포함할 종양 부위를 선택합니다.",
-)
-
-# 필터링 적용
-filtered_df = df[
-    df["Tumor Disease Anatomic Site"].isin(selected_sites)
-].copy()
-
-# 요약 지표 출력
+# 데이터 개요 표시
 st.sidebar.markdown("---")
-st.sidebar.subheader("📊 데이터 개요")
-total_samples = len(df)
-valid_metric_samples = filtered_df[
-    [msi_metric, "Mutation Count", status_col]
-].dropna()
+st.sidebar.subheader("📊 데이터 요약")
+st.sidebar.caption(f"로드된 파일: `{loaded_filename}`")
+st.sidebar.write(f"• 전체 샘플 수: **{len(df):,}** 건")
 
-col_m1, col_m2 = st.columns(2)
-with col_m1:
-    st.metric("전체 샘플 수", f"{total_samples} 건")
-with col_m2:
-    st.metric("유효 분석 샘플 수", f"{len(valid_metric_samples)} 건")
+# 기본 색상 매핑
+color_discrete_map = {"MSS": "#1f77b4", "MSI-H": "#d62728"}
+y_label = "Mutation Count (Log10 Scale)" if use_log_scale else "Mutation Count"
 
-msi_counts = valid_metric_samples[status_col].value_counts()
-st.sidebar.write(f"**{status_col} 분포**:")
-for status, count in msi_counts.items():
-    st.sidebar.write(
-        f"- {status}: {count}건 ({count/len(valid_metric_samples)*100:.1f}%)"
-    )
-
-# ----------------- 탭 구성 및 메인 시각화 -----------------
+# 4. 분석 결과 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(
     [
         "1. MSI 점수 vs 돌연변이 수 산점도",
         "2. MSI 상태별 돌연변이 수 상자그림",
-        "3. 종양 위치별 그룹 산점도",
-        "4. 원본 데이터 테이블",
+        "3. 종양 발생 위치별 산점도",
+        "4. 원본 데이터 미리보기",
     ]
 )
 
-# 공통 색상 팔레트
-color_discrete_map = {"MSS": "#3366CC", "MSI-H": "#DC3912"}
-
-# --- TAB 1: MSI 점수 vs 돌연변이 수 산점도 ---
+# --- 탭 1: MSI 점수와 돌연변이 수 산점도 ---
 with tab1:
-    st.subheader(f"{msi_metric}와 Mutation Count의 상관관계 산점도")
+    st.subheader(f"1. {msi_metric}와 돌연변이 수(Mutation Count) 산점도")
 
-    # 결측치 제거
-    plot1_df = filtered_df[
-        [msi_metric, "Mutation Count", status_col, "Tumor Disease Anatomic Site"]
-    ].dropna()
+    cols1 = [msi_metric, "Mutation Count", status_col, "Tumor Disease Anatomic Site"]
+    plot1_df = df[cols1].dropna()
 
     fig1 = px.scatter(
         plot1_df,
@@ -159,46 +115,43 @@ with tab1:
         hover_data=["Tumor Disease Anatomic Site"],
         log_y=use_log_scale,
         labels={
-            msi_metric: f"{msi_metric} 값",
-            "Mutation Count": (
-                "Mutation Count (Log Scale)"
-                if use_log_scale
-                else "Mutation Count"
-            ),
-            status_col: "MSI 판정 상태",
+            msi_metric: f"{msi_metric}",
+            "Mutation Count": y_label,
+            status_col: "MSI 판정",
+            "Tumor Disease Anatomic Site": "종양 위치",
         },
-        title=f"{msi_metric} 대비 체세포 돌연변이 축적도",
         template="plotly_white",
+        height=550,
     )
 
-    # 임계값 수직 기준선 추가
+    # 임계 기준선 추가
     fig1.add_vline(
         x=threshold,
         line_width=2,
         line_dash="dash",
-        line_color="black",
-        annotation_text=f"기준선 ({threshold})",
+        line_color="#333333",
+        annotation_text=threshold_label,
         annotation_position="top right",
     )
-
     fig1.update_layout(
-        height=550, legend=dict(yanchor="top", y=0.98, xanchor="left", x=0.02)
+        autosize=True,
+        legend=dict(yanchor="top", y=0.98, xanchor="left", x=0.02),
     )
     st.plotly_chart(fig1, use_container_width=True)
 
-    # 상관계수 계산 (Spearman rank correlation)
+    # 상관계수 계산 (Spearman Rank Correlation)
     corr, pval = stats.spearmanr(plot1_df[msi_metric], plot1_df["Mutation Count"])
-    st.caption(
-        f"📌 **Spearman 상관계수**: {corr:.3f} (p-value: {pval:.2e}) — 미세부수체 불안정성이 높을수록 유의미하게 많은 돌연변이가 축적되는 경향을 보입니다."
+    st.info(
+        f"📌 **Spearman 상관계수**: `{corr:.3f}` (p-value: `{pval:.2e}`) — "
+        f"유효 샘플 {len(plot1_df):,}건 기준, {msi_metric} 값이 증가할수록 돌연변이 축적이 유의미하게 많아집니다."
     )
 
-# --- TAB 2: MSI-H vs MSS 상자그림 ---
+# --- 탭 2: MSI 상태별 돌연변이 수 상자그림 ---
 with tab2:
-    st.subheader(f"{status_col}에 따른 돌연변이 수 분포 (Box Plot)")
+    st.subheader(f"2. {status_col}에 따른 돌연변이 수 분포 (Box Plot)")
 
-    plot2_df = filtered_df[
-        [status_col, "Mutation Count", "Tumor Disease Anatomic Site"]
-    ].dropna()
+    cols2 = [status_col, "Mutation Count", "Tumor Disease Anatomic Site"]
+    plot2_df = df[cols2].dropna()
 
     fig2 = px.box(
         plot2_df,
@@ -212,42 +165,32 @@ with tab2:
         category_orders={status_col: ["MSS", "MSI-H"]},
         labels={
             status_col: "MSI 상태",
-            "Mutation Count": (
-                "Mutation Count (Log Scale)"
-                if use_log_scale
-                else "Mutation Count"
-            ),
+            "Mutation Count": y_label,
+            "Tumor Disease Anatomic Site": "종양 위치",
         },
-        title="MSI 상태(MSS vs MSI-H)별 돌연변이 수 분포 비교",
         template="plotly_white",
+        height=550,
     )
-
-    fig2.update_layout(height=550, showlegend=False)
+    fig2.update_layout(autosize=True, showlegend=False)
     st.plotly_chart(fig2, use_container_width=True)
 
-    # 비모수 통계 검정 (Mann-Whitney U Test)
+    # 비모수 검정 (Mann-Whitney U Test)
     mss_mut = plot2_df[plot2_df[status_col] == "MSS"]["Mutation Count"]
     msih_mut = plot2_df[plot2_df[status_col] == "MSI-H"]["Mutation Count"]
 
     if len(mss_mut) > 0 and len(msih_mut) > 0:
         stat, p_val = stats.mannwhitneyu(msih_mut, mss_mut, alternative="greater")
-        st.markdown(
-            f"""
-            - **MSS 중앙값(Median)**: {mss_mut.median():.1f} 개 (평균: {mss_mut.mean():.1f})
-            - **MSI-H 중앙값(Median)**: {msih_mut.median():.1f} 개 (평균: {msih_mut.mean():.1f})
-            - **Mann-Whitney U 검정**: p-value = `{p_val:.2e}` (MSI-H 군의 돌연변이 축적이 통계적으로 유의하게 높음)
-            """
-        )
+        col_s1, col_s2, col_s3 = st.columns(3)
+        col_s1.metric("MSS 중앙값 (평균)", f"{mss_mut.median():.0f} ({mss_mut.mean():.1f})")
+        col_s2.metric("MSI-H 중앙값 (평균)", f"{msih_mut.median():.0f} ({msih_mut.mean():.1f})")
+        col_s3.metric("Mann-Whitney U p-value", f"{p_val:.2e}")
 
-# --- TAB 3: 종양 발생 위치별 산점도 ---
+# --- 탭 3: 종양 발생 위치별 그룹 산점도 ---
 with tab3:
-    st.subheader(
-        f"종양 발생 위치(Anatomic Site)별 {msi_metric} 및 Mutation Count 분석"
-    )
+    st.subheader(f"3. 종양 발생 위치에 따른 {msi_metric}와 돌연변이 수 산점도")
 
-    plot3_df = filtered_df[
-        [msi_metric, "Mutation Count", status_col, "Tumor Disease Anatomic Site"]
-    ].dropna()
+    cols3 = [msi_metric, "Mutation Count", status_col, "Tumor Disease Anatomic Site"]
+    plot3_df = df[cols3].dropna()
 
     fig3 = px.scatter(
         plot3_df,
@@ -258,7 +201,47 @@ with tab3:
         hover_data=[status_col],
         log_y=use_log_scale,
         labels={
-            msi_metric: f"{msi_metric} 값",
-            "Mutation Count": (
-                "Mutation Count (Log Scale)"
-                if use_log_scale
+            msi_metric: f"{msi_metric}",
+            "Mutation Count": y_label,
+            "Tumor Disease Anatomic Site": "종양 발생 부위",
+            status_col: "MSI 판정",
+        },
+        template="plotly_white",
+        height=550,
+    )
+    fig3.add_vline(
+        x=threshold,
+        line_width=1.5,
+        line_dash="dot",
+        line_color="gray",
+        annotation_text=threshold_label,
+    )
+    fig3.update_layout(autosize=True)
+    st.plotly_chart(fig3, use_container_width=True)
+
+    # 발생 부위별 요약 통계 테이블
+    st.markdown("##### 📍 발생 부위별 MSI 분류 현황")
+    site_summary = (
+        plot3_df.groupby(["Tumor Disease Anatomic Site", status_col])
+        .size()
+        .unstack(fill_value=0)
+    )
+    if "MSI-H" in site_summary.columns and "MSS" in site_summary.columns:
+        site_summary["합계"] = site_summary["MSS"] + site_summary["MSI-H"]
+        site_summary["MSI-H 비율(%)"] = (
+            (site_summary["MSI-H"] / site_summary["합계"]) * 100
+        ).round(1)
+    st.dataframe(site_summary, use_container_width=True)
+
+# --- 탭 4: 원본 데이터 테이블 ---
+with tab4:
+    st.subheader("4. 정제 데이터셋 테이블")
+    st.dataframe(df, use_container_width=True)
+
+    csv_data = df.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        label="📥 데이터 CSV 다운로드",
+        data=csv_data,
+        file_name="processed_colorectal_msi.csv",
+        mime="text/csv",
+    )
