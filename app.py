@@ -14,10 +14,16 @@ st.set_page_config(
 )
 
 st.title("🧬 대장암 미세부수체 불안정성(MSI) 및 돌연변이 축적 분석")
+
+# [신규 추가] 원자료 출처, cBioPortal 플랫폼 정보 및 GitHub README 권장 안내 텍스트 추가
 st.markdown(
     """
 TCGA 대장선암 데이터를 기반으로 **미세부수체 불안정성(MSI) 지표**와 
 **체세포 돌연변이 수(Mutation Count)**의 상관관계 및 종양 발생 부위별 분포를 분석합니다.
+
+- **원자료**: The Cancer Genome Atlas (TCGA), Colorectal Adenocarcinoma (PanCancer Atlas)
+- **데이터 제공·탐색 플랫폼**: cBioPortal
+- 웹앱을 이용하기 전에 GitHub의 README를 먼저 읽어보시면, 연구의 목적과 데이터 및 분석 방법을 이해하는 데 도움이 됩니다.
 """
 )
 
@@ -191,7 +197,6 @@ with tab1:
             f"그래프 상의 검은 실선(회귀선) 위에 마우스를 올리면 회귀식과 R²을 확인할 수 있습니다."
         )
 
-    # [신규 추가] 필터(MSI 지표, 로그스케일, 위치)와 무관하게 산점도 하단에 상시 출력되는 종합 상관관계 해석 텍스트
     st.markdown(
         """
         > **분석 종합 요약**:  
@@ -252,7 +257,6 @@ with tab2:
             )
             col_s3.metric("Mann-Whitney U p-value", f"{p_val:.2e}")
 
-    # [신규 추가] 필터(MSI 지표, 로그스케일, 위치)와 무관하게 상자그림 하단에 상시 출력되는 군간 비교 해석 텍스트
     st.markdown(
         """
         > **집단 비교 분석 요약**:  
@@ -320,7 +324,6 @@ with tab3:
             ).round(1)
         st.dataframe(site_summary, use_container_width=True)
 
-    # [신규 추가] 필터(MSI 지표, 로그스케일, 위치)와 무관하게 종양 위치별 그룹 산점도 하단에 상시 출력되는 위치별 추세 해석 텍스트
     st.markdown(
         """
         > **종양 발생 부위별 종합 해석**:  
