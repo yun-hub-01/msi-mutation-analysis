@@ -191,6 +191,14 @@ with tab1:
             f"그래프 상의 검은 실선(회귀선) 위에 마우스를 올리면 회귀식과 R²을 확인할 수 있습니다."
         )
 
+    # [신규 추가] 필터(MSI 지표, 로그스케일, 위치)와 무관하게 산점도 하단에 상시 출력되는 종합 상관관계 해석 텍스트
+    st.markdown(
+        """
+        > **분석 종합 요약**:  
+        > MSIsensor 점수가 높을수록 돌연변이 수도 증가하는 양의 상관관계가 나타나며, 상관계수는 0.348이다. MANTIS 점수와 돌연변이 수 사이에서도 양의 상관관계가 나타나며, 상관계수는 0.360이다. 따라서 두 MSI 지표 모두 돌연변이 수와 양의 상관관계를 보인다. 즉, MSI 정도가 높은 종양에서 돌연변이 수도 많은 경향이 관찰된다. 다만 상관계수가 약 0.35 수준이므로 매우 강한 관계라고 보기는 어렵다.
+        """
+    )
+
 # --- 탭 2: MSI 상태별 돌연변이 수 상자그림 ---
 with tab2:
     st.subheader(
@@ -229,7 +237,6 @@ with tab2:
         mss_mut = plot2_df[plot2_df[status_col] == "MSS"]["Mutation Count"]
         msih_mut = plot2_df[plot2_df[status_col] == "MSI-H"]["Mutation Count"]
 
-        # 오류가 발생했던 라인 복원 (괄호 및 변수명 완전 종결)
         if len(mss_mut) > 0 and len(msih_mut) > 0:
             stat, p_val = stats.mannwhitneyu(
                 msih_mut, mss_mut, alternative="greater"
@@ -244,6 +251,14 @@ with tab2:
                 f"{msih_mut.median():.0f} ({msih_mut.mean():.1f})",
             )
             col_s3.metric("Mann-Whitney U p-value", f"{p_val:.2e}")
+
+    # [신규 추가] 필터(MSI 지표, 로그스케일, 위치)와 무관하게 상자그림 하단에 상시 출력되는 군간 비교 해석 텍스트
+    st.markdown(
+        """
+        > **집단 비교 분석 요약**:  
+        > MSIsensor 기준 MSI-H집단의 돌연변이 수 중앙값은 1,164개로 MSS 집단의 98개보다 약 11.9배 높다. MANTIS기준 MSI-H 집단의 돌연변이 수 중앙값은 1,083개로 MSS 집단의 98개보다 약 11.1배 높다. 두 MSI 판정 기준 모두 MSI-H 집단에서 돌연변이 수가 훨씬 많은 경향을 보인다.
+        """
+    )
 
 # --- 탭 3: 종양 발생 위치별 그룹 산점도 ---
 with tab3:
@@ -304,6 +319,14 @@ with tab3:
                 (site_summary["MSI-H"] / site_summary["합계"]) * 100
             ).round(1)
         st.dataframe(site_summary, use_container_width=True)
+
+    # [신규 추가] 필터(MSI 지표, 로그스케일, 위치)와 무관하게 종양 위치별 그룹 산점도 하단에 상시 출력되는 위치별 추세 해석 텍스트
+    st.markdown(
+        """
+        > **종양 발생 부위별 종합 해석**:  
+        > MSIsensor 기준으로 대장과 직장의 MSI 점수와 돌연변이 수 사이의 관계는 서로 다른 양상을 보이며, 대장과 달리 직장에서는 MSI 점수가 높아질수록 돌연변이 수가 증가하는 경향이 관찰된다. MANTIS 기준으로 대장과 직장 모두 MSI 점수가 높아질수록 돌연변이 수가 증가하는 경향을 보이며, 발생 위치에 따라 추세의 양상에는 차이가 있다. 그러나 발생 위치별 표본 수의 차이가 있기 때문에 표본 수의 차이를 고려한 추가적인 검토가 필요하다.
+        """
+    )
 
 # --- 탭 4: 원본 데이터 테이블 ---
 with tab4:
